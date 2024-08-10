@@ -1,0 +1,747 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, user-scalable=no">
+        <script src="https://supertestnet.github.io/bitcoin-chess/js/qrcode.js"></script>
+        <script src="https://supertestnet.github.io/nwcjs/nwcjs.js"></script>
+        <script src="https://bundle.run/browserify-cipher@1.0.1"></script>
+        <script src="https://bundle.run/noble-secp256k1@1.2.14"></script>
+        <script src="https://bundle.run/bech32@2.0.0"></script>
+        <style>
+            * {
+                box-sizing: border-box;
+                font-size: 1.15rem;
+                font-family: Arial, sans-serif;
+            }
+            html {
+                max-width: 800px;
+                padding: 3rem 1rem;
+                margin: auto;
+                line-height: 1.25;
+                padding: 0;
+            }
+            body {
+                margin: 3rem 1rem;
+            }
+            h1 {
+                font-size: 2rem;
+            }
+            h2 {
+                font-size: 1.5rem;
+            }
+            input {
+                line-height: 1.25;
+                width: 100%;
+                height: 1.8rem;
+                font-size: 1.15rem;
+                border: 1px solid grey;
+            }
+            .hidden {
+                display: none !important;
+            }
+            .your_prisms, .new_prism_page, .view_prism, .logs {
+                border: 1px solid black;
+                border-radius: 1rem;
+                padding: 1rem;
+            }
+            .logs {
+                margin-top: 1rem;
+            }
+            .prism_user, .ln_addy_div, .iou_div, .log_div {
+                margin-top: 1rem;
+                display: flex;
+                gap: 0.5rem;
+            }
+            .iou_div, .log_div {
+                gap: 0.7rem;
+            }
+            .prism_user .ln_addy {
+                width: calc( 75% - 1.5rem );
+            }
+            .prism_user .percent {
+                width: calc( 25% - 1.5rem );
+            }
+            .ln_addy_div .ln_addy, .iou_div .ln_addy,
+            .iou_div .ln_addy_label, .log_div .log_label,
+            .log_div .log_details {
+                border: 1px solid #cccccc;
+                padding: 0.3rem;
+                width: calc( 75% - 1rem );
+                color: #777777;
+                overflow: hidden;
+            }
+            .ln_addy_div .percent, .iou_div .sats_owed,
+            .iou_div .sats_owed_label, .iou_div .times_tried,
+            .iou_div .times_tried_label, .log_div .log_kind,
+            .log_div .kind_label, .log_div .log_timestamp,
+            .log_div .timestamp_label {
+                border: 1px solid #cccccc;
+                padding: 0.3rem;
+                width: calc( 25% - 1rem );
+                color: #777777;
+                overflow: hidden;
+            }
+            .iou_div .ln_addy_label, .iou_div .sats_owed_label,
+            .iou_div .times_tried_label, .log_div .log_label,
+            .log_div .kind_label, .log_div .timestamp_label {
+                overflow: visible;
+                font-weight: bold;
+                border: none;
+                color: black;
+            }
+            .iou_div .ln_addy_label, .log_div .log_label {
+                width: calc( 40% - 1rem );
+            }
+            .iou_div .ln_addy, .log_div .log_details {
+                width: calc( 40% - 1rem );
+            }
+            .log_div .log_details, .log_div .log_kind,
+            .log_div .log_timestamp {
+                word-wrap: break-word;
+            }
+            .iou_div .sats_owed_label, .iou_div .times_tried_label,
+            .iou_div .sats_owed, .iou_div .times_tried,
+            .log_div .kind_label, .log_div .timestamp_label,
+            .log_div .log_kind, .log_div .log_timestamp {
+                width: calc( 30% - 1rem );
+            }
+            .addbox, .removebox {
+                border: 1px solid black;
+                text-align: center;
+                display: flex;
+                width: 2rem;
+                justify-content: center;
+                align-items: center;
+                cursor: pointer;
+            }
+            .prism_btns {
+                text-align: right;
+            }
+            .prism_btns button {
+                margin: .5rem;
+            }
+            .prism_name {
+                font-weight: bold;
+            }
+            .copy_box {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                height: 2.2rem;
+            }
+            .copy_addy {
+                width: 100%;
+                max-width: 78%;
+                word-wrap: break-word;
+                background-color: #cccccc;
+                border: 1px solid black;
+                padding: .3rem;
+                height: 100%;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                display: block;
+                user-select: none;
+            }
+            .copy_btn {
+                width: 100%;
+                max-width: 18%;
+                text-align: center;
+                background-color: #cccccc;
+                border: 1px solid black;
+                padding: .3rem;
+                height: 100%;
+                padding-top: 3%;
+                cursor: pointer;
+            }
+            .toast {
+                box-sizing: border-box;
+                visibility: hidden;
+                width: 250px;
+                margin-left: -125px;
+                background-color: rgb(97, 235, 52);
+                color: white;
+                text-align: center;
+                border-radius: 2px;
+                padding: 16px;
+                position: fixed;
+                z-index: 1;
+                left: 50%;
+                bottom: 30px;
+            }
+
+            .toast.show {
+                visibility: visible;
+                -webkit-animation: fadein 0.5s, fadeout 0.5s 2.5s;
+                animation: fadein 0.5s, fadeout 0.5s 2.5s;
+            }
+
+            @-webkit-keyframes fadein {
+                from {bottom: 0; opacity: 0;}
+                to {bottom: 30px; opacity: 1;}
+            }
+
+            @keyframes fadein {
+                from {bottom: 0; opacity: 0;}
+                to {bottom: 30px; opacity: 1;}
+            }
+
+            @-webkit-keyframes fadeout {
+                from {bottom: 30px; opacity: 1;}
+                to {bottom: 0; opacity: 0;}
+            }
+
+            @keyframes fadeout {
+                from {bottom: 30px; opacity: 1;}
+                to {bottom: 0; opacity: 0;}
+            }
+            @media screen and (max-width: 600px) {
+            }
+        </style>
+        <style>
+            .black-bg {
+                width: 100%;
+                position: fixed;
+                top: 0;
+                left: 0;
+                background-color: black;
+                opacity: .5;
+                width: 100vw;
+                height: 100vh;
+            }
+            .modal {
+                position: fixed;
+                box-sizing: border-box;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%,-50%);
+                width: 90%;
+                max-width: 560px;
+                background-color: white;
+                border-radius: 1rem;
+                padding: 20px;
+                color: black;
+                text-align: center;
+                word-wrap: break-word;
+            }
+            .modal * {
+                color: black;
+            }
+        </style>
+        <script>
+            var $ = document.querySelector.bind( document );
+            var $$ = document.querySelectorAll.bind( document );
+            var url_params = new URLSearchParams( window.location.search );
+            var url_keys = url_params.keys();
+            var $_GET = {}
+            for ( var key of url_keys ) $_GET[ key ] = url_params.get( key );
+        </script>
+    </head>
+    <body>
+        <h1>Welcome to NWC Prisms</h1>
+        <p>Autopay a group over lightning</p>
+        <div class="your_prisms"></div>
+        <p><button class="new_prism">New prism</button></p>
+        <div class="new_prism_page hidden"></div>
+        <p>&nbsp;</p>
+        <img src="https://upload.wikimedia.org/wikipedia/commons/2/25/Prism_flat_rainbow.jpg" style="width: 100%; border-radius: 5rem;">
+        <script>
+            var skip = false;
+            var nwc_prisms = {
+                state: {},
+                tryToSend: async ( prism_id, addy, idx ) => {
+                    if ( !prism_id ) return;
+                    var lnaddy = addy[ 0 ];
+                    var amount = addy[ 1 ];
+                    var relays = ["wss://nostrue.com"];
+                    var [ invoice, checking_id ] = await nwcjs.getZapRequest( lnaddy, amount, relays );
+                    var amnt = null;
+                    var worked = false;
+                    // var rand = Math.floor( Math.random() * 100 );
+                    // if ( rand < 80 ) skip = true;
+                    if ( amount && addy.length === 2 ) {
+                        nwc_prisms.state[ prism_id ].balance = nwc_prisms.state[ prism_id ].balance + ( amount * 1000 );
+                    }
+                    if ( amount && !skip ) {
+                        var nwc_info = nwcjs.processNWCstring( nwc_prisms.state[ prism_id ].nwc_string );
+                        await nwcjs.tryToPayInvoice( nwc_info, invoice, amnt );
+                        var loop = async ( tries = 0 ) => {
+                            await nwcjs.waitSomeSeconds( 5 );
+                            var delay_tolerance = 10;
+                            var payment_succeeded = await nwcjs.didPaymentSucceed( nwc_info, invoice, delay_tolerance );
+                            if ( tries > 9 ) return payment_succeeded;
+                            if ( !payment_succeeded ) return await loop( tries + 1 );
+                            return payment_succeeded;
+                        }
+                        worked =  await loop();
+                    } else {
+                        //if there is nothing to send, always act as though it worked
+                        worked = true;
+                    }
+                    if ( skip ) worked = false;
+                    if ( !worked ) {
+                        nwc_prisms.state[ prism_id ].logs.push( [ Math.floor( Date.now() / 1000 ), "IOU", `sending ${amount} sats to ${lnaddy} didn't work so I am creating or renewing an IOU for that amount` ] );
+                        var num_of_tries = 1;
+                        if ( addy.length === 2 ) nwc_prisms.state[ prism_id ].ious.push( [ ...addy, num_of_tries ] );
+                        if ( addy.length > 2 ) {
+                            num_of_tries = addy[ 2 ] + 1;
+                            nwc_prisms.state[ prism_id ].ious.splice( idx, 1 );
+                            var new_addy = JSON.parse( JSON.stringify( addy ) );
+                            new_addy.pop();
+                            nwc_prisms.state[ prism_id ].ious.push( [ ...new_addy, num_of_tries ] );
+                        }
+                        await nwcjs.waitSomeSeconds( 1 );
+                        return;
+                    }
+                    if ( amount ) {
+                        nwc_prisms.state[ prism_id ].total_sent = nwc_prisms.state[ prism_id ].total_sent + amount;
+                        nwc_prisms.state[ prism_id ].logs.push( [ Math.floor( Date.now() / 1000 ), "sent", `sent ${amount} sats to ${lnaddy} -- the invoice was ${invoice} and the preimage is ${worked}` ] );
+                        if ( addy.length > 2 ) {
+                            nwc_prisms.state[ prism_id ].logs.push( [ Math.floor( Date.now() / 1000 ), "IOU resolved", `resolving outstanding iou since the send worked` ] );
+                            nwc_prisms.state[ prism_id ].balance = nwc_prisms.state[ prism_id ].balance - ( amount * 1000 );
+                        }
+                    }
+                    if ( addy.length > 2 ) nwc_prisms.state[ prism_id ].ious.splice( idx, 1 );
+                    await nwcjs.waitSomeSeconds( 1 );
+                    nwc_prisms.state[ prism_id ].send_in_use = false;
+                },
+                resolveIOUs: async prism_id => {
+                    if ( !( prism_id in nwc_prisms.state ) ) return;
+                    nwc_prisms.state[ prism_id ].last_time_iou_resolver_ran = Math.floor( Date.now() / 1000 );
+                    if ( !nwc_prisms.state[ prism_id ].ious.length ) return;
+                    if ( nwc_prisms.state[ prism_id ].send_in_use ) {
+                        nwc_prisms.state[ prism_id ].waiting_to_use = true;
+                        var loop = async () => {
+                            await nwcjs.waitSomeSeconds( 1 );
+                            if ( !nwc_prisms.state[ prism_id ].send_in_use ) return;
+                            return loop();
+                        }
+                        await loop();
+                    }
+                    nwc_prisms.state[ prism_id ].send_in_use = true;
+                    nwc_prisms.state[ prism_id ].waiting_to_use = false;
+                    var idx = Math.floor( Math.random() * nwc_prisms.state[ prism_id ].ious.length );
+                    var iou_to_resolve = nwc_prisms.state[ prism_id ].ious[ idx ];
+                    await nwc_prisms.tryToSend( prism_id, JSON.parse( JSON.stringify( iou_to_resolve ) ), idx );
+                    nwc_prisms.state[ prism_id ].send_in_use = false;
+                },
+                newPrism: async ( nwc_string, addys, prism_name ) => {
+                    $( '.new_prism_page' ).innerHTML = 'processing...';
+                    $( '.your_prisms' ).innerHTML = 'processing...';
+                    window.scrollTo( 0, 1 );
+                    var nwc_info = nwcjs.processNWCstring( nwc_string );
+                    var delay_tolerance = 10;
+                    var balance = 0;
+                    var balance_info = await nwcjs.getBalance( nwc_info, delay_tolerance );
+                    if ( ( "error" in balance_info ) && balance_info[ "error" ] ) {
+                        $( '.new_prism' ).click();
+                        return alert( `There was an error with your NWC wallet:\n\n${JSON.stringify( balance_info[ "error" ] )}\n\nPlease try again and consider using a different NWC wallet.` );
+                    }
+                    balance = balance_info.result.balance;
+                    var prism_id = "p_" + nwcjs.bytesToHex( nobleSecp256k1.utils.randomBytes( 8 ) );
+                    nwc_prisms.state[ prism_id ] = {
+                        send_in_use: false,
+                        waiting_to_use: false,
+                        last_time_iou_resolver_ran: 0,
+                        show_details: false,
+                        show_logs: false,
+                        time_til_income_check: 30,
+                        prism_name,
+                        nwc_string,
+                        prism_id,
+                        ious: [],
+                        addys,
+                        balance,
+                        fee_reserve: 0,
+                        fee_reserve_ceiling: 5000,
+                        logs: [],
+                        total_received: 0,
+                        total_sent: 0,
+                    }
+                    sessionStorage[ "prism_show_count" ] = 9;
+                    nwc_prisms.autoPrism( prism_id );
+                    return true;
+                },
+                autoPrism: async prism_id => {
+                    if ( !( prism_id in nwc_prisms.state ) ) return;
+                    if ( nwc_prisms.state[ prism_id ].waiting_to_use ) await nwcjs.waitSomeSeconds( 2 );
+                    if ( nwc_prisms.state[ prism_id ].send_in_use ) {
+                        var loop = async () => {
+                            await nwcjs.waitSomeSeconds( 1 );
+                            if ( !nwc_prisms.state[ prism_id ].send_in_use ) return;
+                            return loop();
+                        }
+                        await loop();
+                    }
+                    nwc_prisms.state[ prism_id ].send_in_use = true;
+                    if ( Math.floor( Date.now() / 1000 ) - nwc_prisms.state[ prism_id ].last_time_iou_resolver_ran >= 600 ) {
+                        nwc_prisms.resolveIOUs( prism_id );
+                    }
+                    var time_til = nwc_prisms.state[ prism_id ].time_til_income_check;
+                    if ( time_til > 0 ) {
+                        nwc_prisms.state[ prism_id ].time_til_income_check = time_til - 1;
+                        await nwcjs.waitSomeSeconds( 1 );
+                        nwc_prisms.state[ prism_id ].send_in_use = false;
+                        nwc_prisms.autoPrism( prism_id );
+                        return;
+                    }
+                    nwc_prisms.state[ prism_id ].time_til_income_check = 30;
+                    var prev_balance = nwc_prisms.state[ prism_id ].balance;
+                    var nwc_info = nwcjs.processNWCstring( nwc_prisms.state[ prism_id ].nwc_string );
+                    var delay_tolerance = 10;
+                    var balance_info = await nwcjs.getBalance( nwc_info, delay_tolerance );
+                    if ( ( "error" in balance_info ) && balance_info[ "error" ] ) {
+                        nwc_prisms.state[ prism_id ].logs.push( [ Math.floor( Date.now() / 1000 ), "error", balance_info[ "error" ] ] );
+                        await nwcjs.waitSomeSeconds( 3 );
+                        nwc_prisms.state[ prism_id ].send_in_use = false;
+                        nwc_prisms.autoPrism( prism_id );
+                        return;
+                    }
+                    var sum_in_ious = 0;
+                    nwc_prisms.state[ prism_id ].ious.forEach( iou => sum_in_ious = sum_in_ious + iou[ 1 ] );
+                    var new_balance = balance_info.result.balance - sum_in_ious;
+                    if ( new_balance < 0 ) return alert( `something went horribly wrong -- your wallet indicates you have more ious than reserves. Aborting. Please share your logs and ask a developer for help.` );
+                    if ( nwc_prisms.state[ prism_id ].fee_reserve * 1000 > new_balance ) nwc_prisms.state[ prism_id ].fee_reserve = Math.floor( new_balance / 1000 );
+                    var sats_to_send = Math.floor( ( new_balance - prev_balance ) / 1000 );
+                    var received_this_time = sats_to_send;
+                    if ( sats_to_send > 0 ) nwc_prisms.state[ prism_id ].total_received = nwc_prisms.state[ prism_id ].total_received + sats_to_send;
+                    //keep 1.5% or 5 sats (whichever is larger) to pay routing fees
+                    var keep_for_fees = 0;
+                    if ( sats_to_send > 0 ) keep_for_fees = Math.max( Math.round( sats_to_send * .015 ), 5 );
+                    var fee_reserve = 0;
+                    //if the fee_reserve is already at or near the fee_reserve ceiling, do not withhold
+                    //any sats
+                    if ( sats_to_send > 0 && ( Math.abs( nwc_prisms.state[ prism_id ].fee_reserve_ceiling - nwc_prisms.state[ prism_id ].fee_reserve < 10 ) || nwc_prisms.state[ prism_id ].fee_reserve > nwc_prisms.state[ prism_id ].fee_reserve_ceiling ) ) {
+                        keep_for_fees = 0;
+                        //since we are not taking 1.5% from the income, take it from the fee reserve
+                        //because we still need to pay routing fees
+                        nwc_prisms.state[ prism_id ].fee_reserve = Math.round( .985 * nwc_prisms.state[ prism_id ].fee_reserve );
+                    } else if ( sats_to_send > 0 ) {
+                        fee_reserve = nwc_prisms.state[ prism_id ].fee_reserve + Math.round( sats_to_send * .015 );
+                        //if keeping this amount puts you over your fee reserve ceiling, add
+                        //the extra sats *over* your ceiling to the amount you are sending
+                        //to the users
+                        var extra = 0;
+                        if ( fee_reserve > nwc_prisms.state[ prism_id ].fee_reserve_ceiling ) {
+                            extra = fee_reserve - nwc_prisms.state[ prism_id ].fee_reserve_ceiling;
+                            fee_reserve = nwc_prisms.state[ prism_id ].fee_reserve_ceiling;
+                        }
+                        sats_to_send = ( sats_to_send - keep_for_fees ) + extra;
+                        //save your new fee reserve
+                        nwc_prisms.state[ prism_id ].fee_reserve = fee_reserve;
+                    }
+                    if ( sats_to_send < 0 ) {
+                        nwc_prisms.state[ prism_id ].balance = new_balance;
+                        nwc_prisms.state[ prism_id ].fee_reserve = nwc_prisms.state[ prism_id ].fee_reserve + sats_to_send;
+                        if ( nwc_prisms.state[ prism_id ].fee_reserve < 0 ) nwc_prisms.state[ prism_id ].fee_reserve = 0;
+                        // I commented this out because it wrongly detects "automatic" dispersals as manual spends, so everytime it sends money away automatically, you get an incorrect log
+                        // But I think I fixed that by having it deduct the amount_sent from the balance whenever tryToSpend() succeeds, so I am reinstating this
+                        if ( Math.abs( sats_to_send ) > 5000 ) nwc_prisms.state[ prism_id ].logs.push( [ Math.floor( Date.now() / 1000 ), "spend detected", `someone manually sent ${Math.abs( sats_to_send )} sats away from the wallet -- its balance was ${prev_balance} and is now ${new_balance}` ] );
+                    }
+                    if ( sats_to_send < 1 || isNaN( sats_to_send ) ) {
+                        await nwcjs.waitSomeSeconds( 1 );
+                        nwc_prisms.state[ prism_id ].send_in_use = false;
+                        nwc_prisms.autoPrism( prism_id );
+                        return;
+                    }
+                    nwc_prisms.state[ prism_id ].logs.push( [ Math.floor( Date.now() / 1000 ), "income detected", `received ${received_this_time} sats -- keeping ${received_this_time - Math.abs( sats_to_send )} sats in reserve for potential fees (if 0, using fee reserves to pay fees) -- dividing up the rest, ${Math.abs( sats_to_send )} sats, to send to the recipients` ] );
+                    if ( sats_to_send > 0 ) nwc_prisms.state[ prism_id ].balance = new_balance - ( sats_to_send * 1000 );
+                    else nwc_prisms.state[ prism_id ].balance = new_balance;
+                    var addys_2 = [];
+                    nwc_prisms.state[ prism_id ].addys.forEach( addy => {
+                        var divisor = Number( ( addy[ 1 ] / 100 ).toFixed( 2 ) );
+                        addys_2.push( [ addy[ 0 ], Math.round( sats_to_send * divisor ) ] );
+                    });
+                    var i; for ( i=0; i<addys_2.length; i++ ) {
+                        var addy = addys_2[ i ];
+                        await nwc_prisms.tryToSend( prism_id, JSON.parse( JSON.stringify( addy ) ), i );
+                    }
+                    nwc_prisms.state[ prism_id ].send_in_use = false;
+                    nwc_prisms.autoPrism( prism_id );
+                },
+                deletePrism: prism_id => delete nwc_prisms.state[ prism_id ],
+            }
+        </script>
+        <script>
+            sessionStorage[ "prism_show_count" ] = 10;
+            var showPrisms = async prism_show_count => {
+                prism_show_count = Number( prism_show_count );
+                if ( prism_show_count > 10 ) {
+                    prism_show_count = 0;
+                    sessionStorage[ "prism_show_count" ] = 0;
+                    showPrisms( sessionStorage[ "prism_show_count" ] );
+                    return;
+                }
+                $( '.your_prisms' ).innerHTML = `
+                    <h2>Your prisms</h2>
+                    <p class="no_prisms">You have no prisms</p>
+                `;
+                Object.keys( nwc_prisms.state ).forEach( prism_id => {
+                    var prism = nwc_prisms.state[ prism_id ];
+                    var div = document.createElement( "div" );
+                    var html = `<div class="view_prism ${prism_id}"><div class="prism_name">${prism[ "prism_name" ]}</div>`;
+                    var is_hidden = !prism[ "show_details" ] ? "hidden" : "";
+                    var time_til = prism[ "time_til_income_check" ] === 30 ? "checking now..." : String( prism[ "time_til_income_check" ] ) + " seconds";
+                    //I commented this out because I forgot that users are sometimes likely to empty their
+                    //fee reserve, and that means the fees_paid stat will rise without actually paying
+                    //more in fees
+                    // var text_for_fees_paid = prism[ "time_til_income_check" ] === 30 ? "calculating..." : String( prism[ "total_received" ] - prism[ "total_sent" ] - prism[ "fee_reserve" ] ) + " sats";
+                    html += `<div class="details ${is_hidden}"><div class="ln_addys"><p style="font-weight: bold;">Checking for income in: <span class="time_til" style="font-weight: normal;">${time_til}</span></p><p style="font-weight: bold;">Amount received so far: <span class="sats_received" style="font-weight: normal;">${prism[ "total_received" ]} sats</span></p><p style="font-weight: bold;">Amount forwarded so far: <span class="sats_forwarded" style="font-weight: normal;">${prism[ "total_sent" ]} sats</span></p><p style="font-weight: bold;">Reserved for fees: <span class="fee_reserve" style="font-weight: normal;">${prism[ "fee_reserve" ]} sats</span></p><p style="font-weight: bold;">Fee reserve "ceiling": <span class="fee_ceiling" style="font-weight: normal;">${prism[ "fee_reserve_ceiling"]} sats</span></p><p>The fee reserve ceiling limits how much money is kept in reserve for fees. 1.5% of all income is withheld from recipients and stored in the fee reserve to pay for routing fees. Once the fee reserve hits the ceiling, you stop doing that and the recipients get everything.</p><p style="font-weight: bold;">Recipients</p>`;
+                    prism.addys.forEach( addy => {
+                        html += `<div class="ln_addy_div"><div class="ln_addy">${addy[ 0 ]}</div><div class="percent">${addy[ 1 ]}%</div></div>`;
+                    });
+                    var show_label = !prism.ious.length ? "hidden" : "";
+                    html += `</div><div class="ious"><div class="iou_div"><div class="ln_addy_label">IOUs</div><div class="sats_owed_label ${show_label}">Sats owed</div><div class="times_tried_label ${show_label}">Times tried</div></div>`;
+                    prism.ious.forEach( addy => {
+                        html += `<div class="iou_div"><div class="ln_addy">${addy[ 0 ]}</div><div class="sats_owed">${addy[ 1 ]}&nbsp;sats</div><div class="times_tried">${addy[ 2 ]}</div></div>`;
+                    });
+                    var fn_to_use = !prism[ "show_details" ] ? "showDetails" : "hideDetails";
+                    var show_or_hide = !prism[ "show_details" ] ? "Show" : "Hide";
+                    var iou_warning = `You have no ious currently. An iou represents a payment that this wallet *tried* to send to someone but it failed. This app will log IOUs here and retry one of the IOU payments every ten minutes until they succeed.`;
+                    if ( prism.ious.length ) iou_warning = `Your wallet will retry one of the above payments every ten minutes until they succeed`;
+                    var log_fn_to_use = !prism[ "show_logs" ] ? "showLogs" : "hideLogs";
+                    var show_or_hide_logs = !prism[ "show_logs" ] ? "Show" : "Hide";
+                    var logs_hidden = !prism[ "show_logs" ] ? "hidden" : "";
+                    html += `<p class="iou_warning">${iou_warning}</p></div></div><div class="logs ${logs_hidden}">`;
+                    var logs = JSON.parse( JSON.stringify( prism.logs ) );
+                    logs.reverse();
+                    logs.forEach( ( log, index ) => {
+                        if ( index > 2 ) return;
+                        if ( !index ) html += `<p><button onmousedown="saveLogs( '${prism_id}' );" style="float: right;">Save logs</button><span>Showing last 3 logs. Use the "Save logs" button to view more logs.</span></p><div class="log_div"><div class="log_label">Log</div><div class="kind_label">Kind</div><div class="timestamp_label">Timestamp</div></div>`;
+                        html += `<div class="log_div"><div class="log_details">${log[ 2 ]}</div><div class="log_kind">${log[ 1 ]}</div><div class="log_timestamp">${new Date( log[ 0 ] * 1000 ).toLocaleDateString( "en-CA" )} ${new Date( log[ 0 ] * 1000 ).toLocaleTimeString()}</div></div>`;
+                    });
+                    if ( !prism.logs.length ) html += `your prism has no logs`;
+                    html += `</div><p class="prism_btns"><button class="show_or_hide_prism_details" onmousedown="${fn_to_use}( '${prism_id}' )">${show_or_hide} details</button><button class="send_to_prism" onmousedown="sendToPrism( '${prism_id}' )">Send to prism</button><button class="show_or_hide_prism_logs" onmousedown="${log_fn_to_use}( '${prism_id}' )">${show_or_hide_logs} logs</button><button class="delete_prism" onmousedown="deletePrism( '${prism_id}' )">Delete this prism</button></p></div>`;
+                    div.innerHTML = html;
+                    $( '.your_prisms' ).append( div );
+                });
+                if ( Object.keys( nwc_prisms.state ).length ) $( '.no_prisms' ).classList.add( "hidden" );
+                await nwcjs.waitSomeSeconds( 1 );
+                sessionStorage[ "prism_show_count" ] = prism_show_count + 1;
+                showPrisms( sessionStorage[ "prism_show_count" ] );
+            }
+            showPrisms( sessionStorage[ "prism_show_count" ] );
+            var showDetails = prism_id_or_click => {
+                if ( typeof prism_id_or_click === "string" ) var prism_id = prism_id_or_click;
+                else var prism_id = prism_id_or_click.target.parentElement.parentElement.classList[ 1 ];
+                $( `.${prism_id} .details` ).classList.remove( "hidden" );
+                $( `.${prism_id} .show_or_hide_prism_details` ).innerText = "Hide details";
+                $( `.${prism_id} .show_or_hide_prism_details` ).removeEventListener( "mousedown", showDetails );
+                $( `.${prism_id} .show_or_hide_prism_details` ).addEventListener( "mousedown", hideDetails );
+                nwc_prisms.state[ prism_id ].show_details = true;
+            }
+            var hideDetails = prism_id_or_click => {
+                if ( typeof prism_id_or_click === "string" ) var prism_id = prism_id_or_click;
+                else var prism_id = prism_id_or_click.target.parentElement.parentElement.classList[ 1 ];
+                $( `.${prism_id} .details` ).classList.add( "hidden" );
+                $( `.${prism_id} .show_or_hide_prism_details` ).innerText = "Show details";
+                $( `.${prism_id} .show_or_hide_prism_details` ).removeEventListener( "mousedown", hideDetails );
+                $( `.${prism_id} .show_or_hide_prism_details` ).addEventListener( "mousedown", showDetails );
+                nwc_prisms.state[ prism_id ].show_details = false;
+            }
+            var showLogs = prism_id_or_click => {
+                if ( typeof prism_id_or_click === "string" ) var prism_id = prism_id_or_click;
+                else var prism_id = prism_id_or_click.target.parentElement.parentElement.classList[ 1 ];
+                $( `.${prism_id} .logs` ).classList.remove( "hidden" );
+                $( `.${prism_id} .show_or_hide_prism_logs` ).innerText = "Hide logs";
+                $( `.${prism_id} .show_or_hide_prism_logs` ).removeEventListener( "mousedown", showLogs );
+                $( `.${prism_id} .show_or_hide_prism_logs` ).addEventListener( "mousedown", hideLogs );
+                nwc_prisms.state[ prism_id ].show_logs = true;
+            }
+            var hideLogs = prism_id_or_click => {
+                if ( typeof prism_id_or_click === "string" ) var prism_id = prism_id_or_click;
+                else var prism_id = prism_id_or_click.target.parentElement.parentElement.classList[ 1 ];
+                $( `.${prism_id} .logs` ).classList.add( "hidden" );
+                $( `.${prism_id} .show_or_hide_prism_logs` ).innerText = "Show logs";
+                $( `.${prism_id} .show_or_hide_prism_logs` ).removeEventListener( "mousedown", hideLogs );
+                $( `.${prism_id} .show_or_hide_prism_logs` ).addEventListener( "mousedown", showLogs );
+                nwc_prisms.state[ prism_id ].show_logs = false;
+            }
+            deletePrism = prism_id => {
+                nwc_prisms.deletePrism( prism_id );
+                $( `.${prism_id}` ).remove();
+                if ( !$$( '.view_prism' ).length ) $( '.no_prisms' ).classList.remove( "hidden" );
+            }
+            $( '.new_prism' ).onclick = () => {
+                var html = `
+                    <h2>Create a prism</h2>
+                    <p style="font-weight: bold;">Prism name</p>
+                    <p><input class="name_your_prism"></p>
+                    <p style="font-weight: bold;">Recipients</p>
+                    <p>Add the recipients and the percent per payment each one should get.</p>
+                    <div class="prism_group_boxes">
+                        <div class="prism_user"><span class="ln_addy" style="font-weight: bold;">LN address</span><span class="percent" style="font-weight: bold;">%</span><span>&nbsp;</span></div>
+                    </div>
+                    <p style="font-weight: bold;">NWC string with FULL PERMISSIONS</p>
+                    <p><input class="nwc_string" placeholder="nostr+walletconnect://2fbe..."></p>
+                    <p>Note: I recommend creating a <span style="font-weight: bold;">NEW EMPTY WALLET</span> for your prism. If you use an existing wallet, don't be surprised when it sends your sats away every time you receive anything.</p>
+                    <p><button class="submit_prism">Submit</button></p>
+                `;
+                $( '.new_prism_page' ).innerHTML = html;
+                $( '.new_prism_page' ).classList.remove( "hidden" );
+                $( '.new_prism' ).classList.add( "hidden" );
+                $( '.your_prisms' ).classList.add( "hidden" );
+                $( '.submit_prism' ).onclick = async () => {
+                    var addys = [];
+                    var sum = 0;
+                    var stop = false;
+                    var err = ``;
+                    var prism_name = $( '.name_your_prism' ).value;
+                    $$( '.prism_user' ).forEach( ( item, index ) => {
+                        if ( !index ) return;
+                        var percent = Number( item.children[ 1 ].value );
+                        if ( !percent || isNaN( percent ) ) stop = true;
+                        sum = sum + percent;
+                        addys.push( [ item.children[ 0 ].value, percent ] );
+                    });
+                    if ( stop ) err = `One of your percentages is invalid. Please try again`;
+                    if ( sum > 100 ) err = `Your percentages add up to more than 100%. Please try again`;
+                    if ( !$( '.nwc_string' ).value ) err = `Your NWC string is not valid. Please try again`;
+                    if ( !prism_name ) err = `Your prism needs a name. Please try again`;
+                    if ( err ) return alert( err );
+                    var success = await nwc_prisms.newPrism( $( '.nwc_string' ).value, addys, prism_name );
+                    if ( success ) {
+                        $( '.new_prism_page' ).classList.add( "hidden" );
+                        $( '.new_prism' ).classList.remove( "hidden" );
+                        $( '.your_prisms' ).classList.remove( "hidden" );
+                    }
+                }
+                var removebox = e => e.target.parentElement.remove();
+                var addbox = () => {
+                    var div = document.createElement( "div" );
+                    div.innerHTML = `
+                        <div class="prism_group">
+                            <div class="prism_user"><input class="ln_addy userbox" placeholder="text@example.com"><input class="percent" type="number" min="1" max="100" step="1" placeholder="25"><div class="addbox">+</div></div>
+                        </div>
+                    `;
+                    if ( $( '.addbox' ) ) {
+                        $( '.addbox' ).innerText = "-";
+                        $( '.addbox' ).removeEventListener( "click", addbox );
+                        $( '.addbox' ).addEventListener( "click", removebox );
+                        $( '.addbox' ).className = "removebox";
+                    }
+                    $( '.prism_group_boxes' ).append( div );
+                    $( '.addbox' ).addEventListener( "click", addbox );
+                }
+                addbox();
+            }
+            function saveData( text, fileName ) {
+                var a = document.createElement("a");
+                document.body.appendChild(a);
+                a.style = "display: none";
+                var blob = new Blob([text], {type: "octet/stream"});
+                var url = window.URL.createObjectURL(blob);
+                a.href = url;
+                a.download = fileName;
+                a.click();
+                window.URL.revokeObjectURL(url);
+            }
+            var saveLogs = prism_id => {
+                var logs = JSON.parse( JSON.stringify( nwc_prisms.state[ prism_id ].logs ) );
+                logs.forEach( ( log, index ) => logs[ index ][ 0 ] = `${new Date( log[ 0 ] * 1000 ).toLocaleDateString( "en-CA" )} ${new Date( log[ 0 ] * 1000 ).toLocaleTimeString()}` );
+                var data = JSON.stringify( logs );
+                var fileName = ( new Date( Date.now() ).toLocaleDateString( "en-CA" ) ) + "-logs.json";
+                saveData( data, fileName );
+            }
+            var sendToPrism = async prism_id => {
+                var nwc_info = nwcjs.processNWCstring( nwc_prisms.state[ prism_id ].nwc_string );
+                var num_sats = Number( prompt( `enter how many sats you want to send to this prism` ) );
+                if ( !num_sats ) return;
+                showModal( '<p>Loading...</p>' );
+                var delay_tolerance = 10;
+                var invoice_info = await nwcjs.makeInvoice( nwc_info, num_sats, `sending to this prism: ${nwc_prisms.state[ prism_id ].prism_name}`, delay_tolerance );
+                var invoice = null;
+                if ( "result" in invoice_info && "invoice" in invoice_info.result ) invoice = invoice_info.result.invoice;
+                if ( !invoice && "result" in invoice_info && "bolt11" in invoice_info.result ) invoice = invoice_info.result.bolt11;
+                if ( !invoice ) {
+                    return showModal( `<p>There was a problem connecting to your wallet. Please try again. If the error persists, show this to a developer and ask for help:</p><p>${JSON.stringify( invoice_info )}</p>` );
+                }
+                var url = "lightning:" + invoice;
+                var a = document.createElement( "a" );
+                a.href = url;
+                a.target = "_blank";
+                a.append( createQR( invoice.toUpperCase() ) );
+                var prep_div = document.createElement( "div" );
+                prep_div.append( a );
+                var div_html = prep_div.innerHTML;
+                showModal( `<div style="max-width: 15rem; margin: auto;"><p>Please pay this invoice</p>${div_html}<div class="copy_box"><input class="copy_addy" value="${invoice}" disabled=""><div class="copy_btn">⎘</div></div></div>` );
+                $( '.copy_btn' ).onclick = () => {
+                    var copytext = $( '.copy_addy' );
+                    copytext.select();
+                    copytext.setSelectionRange( 0, 99999 );
+                    navigator.clipboard.writeText( copytext.value );
+                    showToast( 'copied' );
+                }
+                var loop = async () => {
+                    await nwcjs.waitSomeSeconds( 3 );
+                    var delay_tolerance = 10;
+                    var status_info = await nwcjs.checkInvoice( nwc_info, invoice, delay_tolerance );
+                    if ( "error" in status_info && status_info[ "error" ] ) return status_info[ "error" ];
+                    if ( status_info.result.settled_at ) return true;
+                    return await loop();
+                }
+                var paid = await loop();
+                if ( paid === true ) showModal( `<p>Your payment went through and your prism should begin forwarding the money to your recipients within 30 seconds when it next checks for income. View the prism's details for more info.</p>` );
+                else showModal( `<p>Your payment did not go through. Please try again. ${paid}</p>` );
+            }
+            var modalVanish = () => {
+                $( ".black-bg" ).classList.add( "hidden" );
+                $( ".modal" ).classList.add( "hidden" );
+            }
+            var showModal = content => {
+                $( ".modal" ).innerHTML = `<div class="x_modal" style="position: absolute;right: 1rem;top: 0.5rem;font-size: 2rem; cursor: pointer; color: black;" onclick="modalVanish()">&times;</div>`;
+                $( ".modal" ).innerHTML += `<div style="overflow-y: auto; max-height: 80vh; margin-top: 1.5rem;">${content}</div>`;
+                $( ".black-bg" ).classList.remove( "hidden" );
+                $( ".modal" ).classList.remove( "hidden" );
+            }
+            var showToast = content => {
+                $( '.toast' ).innerHTML = content;
+                $( '.toast' ).classList.add( "show" );
+                setTimeout( () => $( '.toast' ).classList.remove( "show" ), 3000 );
+            }
+            var createQR = content => {
+                var dataUriPngImage = document.createElement( "img" ),
+                s = QRCode.generatePNG( content, {
+                    ecclevel: "M",
+                    format: "html",
+                    fillcolor: "#FFFFFF",
+                    textcolor: "#000000",
+                    margin: 4,
+                    modulesize: 8,
+                });
+                dataUriPngImage.src = s;
+                dataUriPngImage.className = "qr_code";
+                dataUriPngImage.style.width = "100%";
+                return dataUriPngImage;
+            }
+            if ( localStorage[ "nwc_prism_state" ] ) nwc_prisms.state = JSON.parse( localStorage[ "nwc_prism_state" ] );
+            var saveState = async () => {
+                localStorage[ "nwc_prism_state" ] = JSON.stringify( nwc_prisms.state );
+                await nwcjs.waitSomeSeconds( 1 );
+                saveState();
+            }
+            saveState();
+        </script>
+        <script>
+        </script>
+        <script>
+            (async()=>{
+                //on startup, set all prisms' last_time_iou_resolver_ran to 0
+                //so that they automatically begin resolving them when I run
+                //autoPrism, which I *also* run on startup
+                var i; for ( i=0; i<Object.keys( nwc_prisms.state ).length; i++ ) {
+                    var prism_id = Object.keys( nwc_prisms.state )[ i ];
+                    nwc_prisms.state[ prism_id ].send_in_use = false;
+                    nwc_prisms.state[ prism_id ].waiting_to_use = false;
+                    nwc_prisms.state[ prism_id ].last_time_iou_resolver_ran = 0;
+                    nwc_prisms.autoPrism( prism_id );
+                    await nwcjs.waitSomeSeconds( 1 );
+                }
+            })();
+        </script>
+        <div class="black-bg hidden" onclick="modalVanish();"></div>
+        <div class="modal hidden"></div>
+        <div class="toast"></div>
+    </body>
+</html>
