@@ -247,7 +247,6 @@
         <p>&nbsp;</p>
         <img src="https://upload.wikimedia.org/wikipedia/commons/2/25/Prism_flat_rainbow.jpg" style="width: 100%; border-radius: 5rem;">
         <script>
-            var skip = false;
             var nwc_prisms = {
                 state: {},
                 tryToSend: async ( prism_id, addy, idx ) => {
@@ -256,22 +255,26 @@
                     var amount = addy[ 1 ];
                     var relays = ["wss://nostrue.com"];
                     var [ invoice, checking_id ] = await nwcjs.getZapRequest( lnaddy, amount, relays );
-                    var amnt = null;
                     var worked = false;
-                    // var rand = Math.floor( Math.random() * 100 );
-                    // if ( rand < 80 ) skip = true;
-                    if ( amount && addy.length === 2 ) {
-                        nwc_prisms.state[ prism_id ].balance = nwc_prisms.state[ prism_id ].balance + ( amount * 1000 );
-                    }
-                    if ( amount && !skip ) {
+                    if ( amount ) {
                         var nwc_info = nwcjs.processNWCstring( nwc_prisms.state[ prism_id ].nwc_string );
+                        var amnt = null;
                         await nwcjs.tryToPayInvoice( nwc_info, invoice, amnt );
                         var loop = async ( tries = 0 ) => {
                             await nwcjs.waitSomeSeconds( 5 );
                             var delay_tolerance = 10;
-                            var payment_succeeded = await nwcjs.didPaymentSucceed( nwc_info, invoice, delay_tolerance );
-                            if ( tries > 9 ) return payment_succeeded;
-                            if ( !payment_succeeded ) return await loop( tries + 1 );
+                            var payment_succeeded = await nwcjs.checkInvoice( nwc_info, invoice, delay_tolerance );
+                            // var payment_succeeded = await nwcjs.didPaymentSucceed( nwc_info, invoice, delay_tolerance );
+                            if ( payment_succeeded && "result" in payment_succeeded && "preimage" in payment_succeeded[ "result" ] && payment_succeeded[ "result" ][ "preimage" ] )
+                                payment_succeeded = payment_succeeded[ "result" ][ "preimage" ];
+                            if ( tries > 9 && typeof payment_succeeded !== "string" ) {
+                                nwc_prisms.state[ prism_id ].logs.push( [ Math.floor( Date.now() / 1000 ), "error", JSON.stringify( payment_succeeded ) ] );
+                                return payment_succeeded;
+                            }
+                            if ( typeof payment_succeeded !== "string" ) {
+                                nwc_prisms.state[ prism_id ].logs.push( [ Math.floor( Date.now() / 1000 ), "error", JSON.stringify( payment_succeeded ) ] );
+                                return await loop( tries + 1 );
+                            }
                             return payment_succeeded;
                         }
                         worked =  await loop();
@@ -279,8 +282,7 @@
                         //if there is nothing to send, always act as though it worked
                         worked = true;
                     }
-                    if ( skip ) worked = false;
-                    if ( !worked ) {
+                    if ( !worked || typeof worked !== "string" ) {
                         nwc_prisms.state[ prism_id ].logs.push( [ Math.floor( Date.now() / 1000 ), "IOU", `sending ${amount} sats to ${lnaddy} didn't work so I am creating or renewing an IOU for that amount` ] );
                         var num_of_tries = 1;
                         if ( addy.length === 2 ) nwc_prisms.state[ prism_id ].ious.push( [ ...addy, num_of_tries ] );
@@ -299,7 +301,6 @@
                         nwc_prisms.state[ prism_id ].logs.push( [ Math.floor( Date.now() / 1000 ), "sent", `sent ${amount} sats to ${lnaddy} -- the invoice was ${invoice} and the preimage is ${worked}` ] );
                         if ( addy.length > 2 ) {
                             nwc_prisms.state[ prism_id ].logs.push( [ Math.floor( Date.now() / 1000 ), "IOU resolved", `resolving outstanding iou since the send worked` ] );
-                            nwc_prisms.state[ prism_id ].balance = nwc_prisms.state[ prism_id ].balance - ( amount * 1000 );
                         }
                     }
                     if ( addy.length > 2 ) nwc_prisms.state[ prism_id ].ious.splice( idx, 1 );
@@ -332,13 +333,12 @@
                     window.scrollTo( 0, 1 );
                     var nwc_info = nwcjs.processNWCstring( nwc_string );
                     var delay_tolerance = 10;
-                    var balance = 0;
-                    var balance_info = await nwcjs.getBalance( nwc_info, delay_tolerance );
-                    if ( ( "error" in balance_info ) && balance_info[ "error" ] ) {
+                    var latest_tx = await nwcjs.listTransactions( nwc_info, null, null, 1, null, null, "incoming", delay_tolerance );
+                    if ( ( "error" in latest_tx ) && latest_tx[ "error" ] ) {
                         $( '.new_prism' ).click();
-                        return alert( `There was an error with your NWC wallet:\n\n${JSON.stringify( balance_info[ "error" ] )}\n\nPlease try again and consider using a different NWC wallet.` );
+                        return alert( `There was an error with your NWC wallet:\n\n${JSON.stringify( latest_tx[ "error" ] )}\n\nPlease try again and consider using a different NWC wallet.` );
                     }
-                    balance = balance_info.result.balance;
+                    latest_timestamp = latest_tx.result.transactions[ 0 ].created_at;
                     var prism_id = "p_" + nwcjs.bytesToHex( nobleSecp256k1.utils.randomBytes( 8 ) );
                     nwc_prisms.state[ prism_id ] = {
                         send_in_use: false,
@@ -352,7 +352,7 @@
                         prism_id,
                         ious: [],
                         addys,
-                        balance,
+                        latest_timestamp,
                         fee_reserve: 0,
                         fee_reserve_ceiling: 5000,
                         logs: [],
@@ -366,13 +366,19 @@
                 autoPrism: async prism_id => {
                     if ( !( prism_id in nwc_prisms.state ) ) return;
                     if ( nwc_prisms.state[ prism_id ].waiting_to_use ) await nwcjs.waitSomeSeconds( 2 );
+                    if ( !( prism_id in nwc_prisms.state ) ) return;
+                    var stop = false;
                     if ( nwc_prisms.state[ prism_id ].send_in_use ) {
                         var loop = async () => {
                             await nwcjs.waitSomeSeconds( 1 );
-                            if ( !nwc_prisms.state[ prism_id ].send_in_use ) return;
+                            if ( !nwc_prisms.state[ prism_id ].send_in_use ) {
+                                stop = true;
+                                return;
+                            }
                             return loop();
                         }
                         await loop();
+                        if ( !( prism_id in nwc_prisms.state ) ) return;
                     }
                     nwc_prisms.state[ prism_id ].send_in_use = true;
                     if ( Math.floor( Date.now() / 1000 ) - nwc_prisms.state[ prism_id ].last_time_iou_resolver_ran >= 600 ) {
@@ -382,28 +388,35 @@
                     if ( time_til > 0 ) {
                         nwc_prisms.state[ prism_id ].time_til_income_check = time_til - 1;
                         await nwcjs.waitSomeSeconds( 1 );
+                        if ( !( prism_id in nwc_prisms.state ) ) return;
                         nwc_prisms.state[ prism_id ].send_in_use = false;
                         nwc_prisms.autoPrism( prism_id );
                         return;
                     }
                     nwc_prisms.state[ prism_id ].time_til_income_check = 30;
-                    var prev_balance = nwc_prisms.state[ prism_id ].balance;
+                    var prev_timestamp = nwc_prisms.state[ prism_id ].latest_timestamp;
                     var nwc_info = nwcjs.processNWCstring( nwc_prisms.state[ prism_id ].nwc_string );
                     var delay_tolerance = 10;
-                    var balance_info = await nwcjs.getBalance( nwc_info, delay_tolerance );
-                    if ( ( "error" in balance_info ) && balance_info[ "error" ] ) {
-                        nwc_prisms.state[ prism_id ].logs.push( [ Math.floor( Date.now() / 1000 ), "error", balance_info[ "error" ] ] );
+                    var latest_txs = await nwcjs.listTransactions( nwc_info, prev_timestamp + 1, null, null, null, null, "incoming", delay_tolerance );
+                    if ( !( prism_id in nwc_prisms.state ) ) return;
+                    if ( ( "error" in latest_txs ) && latest_txs[ "error" ] ) {
+                        nwc_prisms.state[ prism_id ].logs.push( [ Math.floor( Date.now() / 1000 ), "error", latest_txs[ "error" ] ] );
                         await nwcjs.waitSomeSeconds( 3 );
+                        if ( !( prism_id in nwc_prisms.state ) ) return;
                         nwc_prisms.state[ prism_id ].send_in_use = false;
                         nwc_prisms.autoPrism( prism_id );
                         return;
                     }
-                    var sum_in_ious = 0;
-                    nwc_prisms.state[ prism_id ].ious.forEach( iou => sum_in_ious = sum_in_ious + iou[ 1 ] );
-                    var new_balance = balance_info.result.balance - sum_in_ious;
-                    if ( new_balance < 0 ) return alert( `something went horribly wrong -- your wallet indicates you have more ious than reserves. Aborting. Please share your logs and ask a developer for help.` );
-                    if ( nwc_prisms.state[ prism_id ].fee_reserve * 1000 > new_balance ) nwc_prisms.state[ prism_id ].fee_reserve = Math.floor( new_balance / 1000 );
-                    var sats_to_send = Math.floor( ( new_balance - prev_balance ) / 1000 );
+                    latest_txs = latest_txs.result.transactions;
+                    var sats_to_send = 0;
+                    var latest_timestamp = prev_timestamp;
+                    if ( latest_txs.length ) {
+                        latest_timestamp = latest_txs[ 0 ].created_at;
+                        latest_txs.forEach( tx => {
+                            sats_to_send = sats_to_send + tx[ "amount" ];
+                        });
+                    }
+                    sats_to_send = Math.floor( sats_to_send / 1000 );
                     var received_this_time = sats_to_send;
                     if ( sats_to_send > 0 ) nwc_prisms.state[ prism_id ].total_received = nwc_prisms.state[ prism_id ].total_received + sats_to_send;
                     //keep 1.5% or 5 sats (whichever is larger) to pay routing fees
@@ -431,23 +444,15 @@
                         //save your new fee reserve
                         nwc_prisms.state[ prism_id ].fee_reserve = fee_reserve;
                     }
-                    if ( sats_to_send < 0 ) {
-                        nwc_prisms.state[ prism_id ].balance = new_balance;
-                        nwc_prisms.state[ prism_id ].fee_reserve = nwc_prisms.state[ prism_id ].fee_reserve + sats_to_send;
-                        if ( nwc_prisms.state[ prism_id ].fee_reserve < 0 ) nwc_prisms.state[ prism_id ].fee_reserve = 0;
-                        // I commented this out because it wrongly detects "automatic" dispersals as manual spends, so everytime it sends money away automatically, you get an incorrect log
-                        // But I think I fixed that by having it deduct the amount_sent from the balance whenever tryToSpend() succeeds, so I am reinstating this
-                        if ( Math.abs( sats_to_send ) > 5000 ) nwc_prisms.state[ prism_id ].logs.push( [ Math.floor( Date.now() / 1000 ), "spend detected", `someone manually sent ${Math.abs( sats_to_send )} sats away from the wallet -- its balance was ${prev_balance} and is now ${new_balance}` ] );
-                    }
+                    nwc_prisms.state[ prism_id ].latest_timestamp = latest_timestamp;
                     if ( sats_to_send < 1 || isNaN( sats_to_send ) ) {
                         await nwcjs.waitSomeSeconds( 1 );
+                        if ( !( prism_id in nwc_prisms.state ) ) return;
                         nwc_prisms.state[ prism_id ].send_in_use = false;
                         nwc_prisms.autoPrism( prism_id );
                         return;
                     }
                     nwc_prisms.state[ prism_id ].logs.push( [ Math.floor( Date.now() / 1000 ), "income detected", `received ${received_this_time} sats -- keeping ${received_this_time - Math.abs( sats_to_send )} sats in reserve for potential fees (if 0, using fee reserves to pay fees) -- dividing up the rest, ${Math.abs( sats_to_send )} sats, to send to the recipients` ] );
-                    if ( sats_to_send > 0 ) nwc_prisms.state[ prism_id ].balance = new_balance - ( sats_to_send * 1000 );
-                    else nwc_prisms.state[ prism_id ].balance = new_balance;
                     var addys_2 = [];
                     nwc_prisms.state[ prism_id ].addys.forEach( addy => {
                         var divisor = Number( ( addy[ 1 ] / 100 ).toFixed( 2 ) );
@@ -456,6 +461,7 @@
                     var i; for ( i=0; i<addys_2.length; i++ ) {
                         var addy = addys_2[ i ];
                         await nwc_prisms.tryToSend( prism_id, JSON.parse( JSON.stringify( addy ) ), i );
+                        if ( !( prism_id in nwc_prisms.state ) ) return;
                     }
                     nwc_prisms.state[ prism_id ].send_in_use = false;
                     nwc_prisms.autoPrism( prism_id );
@@ -483,10 +489,6 @@
                     var html = `<div class="view_prism ${prism_id}"><div class="prism_name">${prism[ "prism_name" ]}</div>`;
                     var is_hidden = !prism[ "show_details" ] ? "hidden" : "";
                     var time_til = prism[ "time_til_income_check" ] === 30 ? "checking now..." : String( prism[ "time_til_income_check" ] ) + " seconds";
-                    //I commented this out because I forgot that users are sometimes likely to empty their
-                    //fee reserve, and that means the fees_paid stat will rise without actually paying
-                    //more in fees
-                    // var text_for_fees_paid = prism[ "time_til_income_check" ] === 30 ? "calculating..." : String( prism[ "total_received" ] - prism[ "total_sent" ] - prism[ "fee_reserve" ] ) + " sats";
                     html += `<div class="details ${is_hidden}"><div class="ln_addys"><p style="font-weight: bold;">Checking for income in: <span class="time_til" style="font-weight: normal;">${time_til}</span></p><p style="font-weight: bold;">Amount received so far: <span class="sats_received" style="font-weight: normal;">${prism[ "total_received" ]} sats</span></p><p style="font-weight: bold;">Amount forwarded so far: <span class="sats_forwarded" style="font-weight: normal;">${prism[ "total_sent" ]} sats</span></p><p style="font-weight: bold;">Reserved for fees: <span class="fee_reserve" style="font-weight: normal;">${prism[ "fee_reserve" ]} sats</span></p><p style="font-weight: bold;">Fee reserve "ceiling": <span class="fee_ceiling" style="font-weight: normal;">${prism[ "fee_reserve_ceiling"]} sats</span></p><p>The fee reserve ceiling limits how much money is kept in reserve for fees. 1.5% of all income is withheld from recipients and stored in the fee reserve to pay for routing fees. Once the fee reserve hits the ceiling, you stop doing that and the recipients get everything.</p><p style="font-weight: bold;">Recipients</p>`;
                     prism.addys.forEach( addy => {
                         html += `<div class="ln_addy_div"><div class="ln_addy">${addy[ 0 ]}</div><div class="percent">${addy[ 1 ]}%</div></div>`;
@@ -655,6 +657,7 @@
                 if ( "result" in invoice_info && "invoice" in invoice_info.result ) invoice = invoice_info.result.invoice;
                 if ( !invoice && "result" in invoice_info && "bolt11" in invoice_info.result ) invoice = invoice_info.result.bolt11;
                 if ( !invoice ) {
+                    nwc_prisms.state[ prism_id ].logs.push( [ Math.floor( Date.now() / 1000 ), "error", JSON.stringify( invoice_info ) ] );
                     return showModal( `<p>There was a problem connecting to your wallet. Please try again. If the error persists, show this to a developer and ask for help:</p><p>${JSON.stringify( invoice_info )}</p>` );
                 }
                 var url = "lightning:" + invoice;
