@@ -45,6 +45,9 @@
                 border-radius: 1rem;
                 padding: 1rem;
             }
+            .view_prism {
+                margin-bottom: 1rem;
+            }
             .logs {
                 margin-top: 1rem;
             }
@@ -123,6 +126,10 @@
             }
             .prism_name {
                 font-weight: bold;
+            }
+            .conditional_clause_explainer {
+                border: 2px solid black;
+                padding: 1rem;
             }
             .copy_box {
                 display: flex;
@@ -264,7 +271,6 @@
                             await nwcjs.waitSomeSeconds( 5 );
                             var delay_tolerance = 10;
                             var payment_succeeded = await nwcjs.checkInvoice( nwc_info, invoice, delay_tolerance );
-                            // var payment_succeeded = await nwcjs.didPaymentSucceed( nwc_info, invoice, delay_tolerance );
                             if ( payment_succeeded && "result" in payment_succeeded && "preimage" in payment_succeeded[ "result" ] && payment_succeeded[ "result" ][ "preimage" ] )
                                 payment_succeeded = payment_succeeded[ "result" ][ "preimage" ];
                             if ( tries > 9 && typeof payment_succeeded !== "string" ) {
@@ -285,9 +291,9 @@
                     if ( !worked || typeof worked !== "string" ) {
                         nwc_prisms.state[ prism_id ].logs.push( [ Math.floor( Date.now() / 1000 ), "IOU", `sending ${amount} sats to ${lnaddy} didn't work so I am creating or renewing an IOU for that amount` ] );
                         var num_of_tries = 1;
-                        if ( addy.length === 2 ) nwc_prisms.state[ prism_id ].ious.push( [ ...addy, num_of_tries ] );
-                        if ( addy.length > 2 ) {
-                            num_of_tries = addy[ 2 ] + 1;
+                        if ( addy.length === 3 ) nwc_prisms.state[ prism_id ].ious.push( [ ...addy, num_of_tries ] );
+                        if ( addy.length > 3 ) {
+                            num_of_tries = addy[ 3 ] + 1;
                             nwc_prisms.state[ prism_id ].ious.splice( idx, 1 );
                             var new_addy = JSON.parse( JSON.stringify( addy ) );
                             new_addy.pop();
@@ -299,23 +305,33 @@
                     if ( amount ) {
                         nwc_prisms.state[ prism_id ].total_sent = nwc_prisms.state[ prism_id ].total_sent + amount;
                         nwc_prisms.state[ prism_id ].logs.push( [ Math.floor( Date.now() / 1000 ), "sent", `sent ${amount} sats to ${lnaddy} -- the invoice was ${invoice} and the preimage is ${worked}` ] );
-                        if ( addy.length > 2 ) {
+                        if ( addy.length > 3 ) {
                             nwc_prisms.state[ prism_id ].logs.push( [ Math.floor( Date.now() / 1000 ), "IOU resolved", `resolving outstanding iou since the send worked` ] );
                         }
                     }
                     if ( addy.length > 2 ) nwc_prisms.state[ prism_id ].ious.splice( idx, 1 );
                     await nwcjs.waitSomeSeconds( 1 );
-                    nwc_prisms.state[ prism_id ].send_in_use = false;
+                    // nwc_prisms.state[ prism_id ].send_in_use = false;
                 },
                 resolveIOUs: async prism_id => {
                     if ( !( prism_id in nwc_prisms.state ) ) return;
                     nwc_prisms.state[ prism_id ].last_time_iou_resolver_ran = Math.floor( Date.now() / 1000 );
                     if ( !nwc_prisms.state[ prism_id ].ious.length ) return;
-                    if ( nwc_prisms.state[ prism_id ].send_in_use ) {
+                    var send_in_use = nwc_prisms.state[ prism_id ].send_in_use;
+                    var nwc_string = nwc_prisms.state[ prism_id ].nwc_string;
+                    Object.keys( nwc_prisms.state ).forEach( pid => {
+                        if ( nwc_prisms.state[ pid ].nwc_string === nwc_string && nwc_prisms.state[ pid ].send_in_use ) send_in_use = true;
+                    });
+                    if ( send_in_use ) {
                         nwc_prisms.state[ prism_id ].waiting_to_use = true;
                         var loop = async () => {
                             await nwcjs.waitSomeSeconds( 1 );
-                            if ( !nwc_prisms.state[ prism_id ].send_in_use ) return;
+                            var unsendable = nwc_prisms.state[ prism_id ].send_in_use;
+                            var nwc_string = nwc_prisms.state[ prism_id ].nwc_string;
+                            Object.keys( nwc_prisms.state ).forEach( pid => {
+                                if ( nwc_prisms.state[ pid ].nwc_string === nwc_string && nwc_prisms.state[ pid ].send_in_use ) unsendable = true;
+                            });
+                            if ( !unsendable ) return;
                             return loop();
                         }
                         await loop();
@@ -338,11 +354,22 @@
                         $( '.new_prism' ).click();
                         return alert( `There was an error with your NWC wallet:\n\n${JSON.stringify( latest_tx[ "error" ] )}\n\nPlease try again and consider using a different NWC wallet.` );
                     }
-                    latest_timestamp = latest_tx.result.transactions[ 0 ].created_at;
+                    var balance_info = await nwcjs.getBalance( nwc_info, delay_tolerance );
+                    if ( ( "error" in balance_info ) && balance_info[ "error" ] ) {
+                        $( '.new_prism' ).click();
+                        return alert( `There was an error with your NWC wallet:\n\n${JSON.stringify( balance_info[ "error" ] )}\n\nPlease try again and consider using a different NWC wallet.` );
+                    }
+                    var fee_reserve = Math.floor( balance_info.result.balance / 1000 );
+                    var latest_timestamp = Math.floor( Date.now() / 1000 );
+                    if ( latest_tx.result.transactions.length ) latest_timestamp = latest_tx.result.transactions[ 0 ].created_at + 1;
                     var prism_id = "p_" + nwcjs.bytesToHex( nobleSecp256k1.utils.randomBytes( 8 ) );
                     nwc_prisms.state[ prism_id ] = {
+                        first_time_running: true,
+                        transactions_dealt_with: {},
                         send_in_use: false,
+                        middle_of_send: false,
                         waiting_to_use: false,
+                        waiting_to_use_2: false,
                         last_time_iou_resolver_ran: 0,
                         show_details: false,
                         show_logs: false,
@@ -353,7 +380,7 @@
                         ious: [],
                         addys,
                         latest_timestamp,
-                        fee_reserve: 0,
+                        fee_reserve,
                         fee_reserve_ceiling: 5000,
                         logs: [],
                         total_received: 0,
@@ -366,21 +393,38 @@
                 autoPrism: async prism_id => {
                     if ( !( prism_id in nwc_prisms.state ) ) return;
                     if ( nwc_prisms.state[ prism_id ].waiting_to_use ) await nwcjs.waitSomeSeconds( 2 );
+                    if ( nwc_prisms.state[ prism_id ].waiting_to_use_2 ) await nwcjs.waitSomeSeconds( 2 );
                     if ( !( prism_id in nwc_prisms.state ) ) return;
-                    var stop = false;
-                    if ( nwc_prisms.state[ prism_id ].send_in_use ) {
+                    var send_in_use = nwc_prisms.state[ prism_id ].send_in_use;
+                    var nwc_string = nwc_prisms.state[ prism_id ].nwc_string;
+                    Object.keys( nwc_prisms.state ).forEach( pid => {
+                        if ( nwc_prisms.state[ pid ].nwc_string === nwc_string && nwc_prisms.state[ pid ].send_in_use && pid != prism_id ) {
+                            send_in_use = true;
+                            nwc_prisms.state[ pid ].waiting_to_use_2 = true;
+                        }
+                    });
+                    if ( send_in_use ) {
                         var loop = async () => {
                             await nwcjs.waitSomeSeconds( 1 );
-                            if ( !nwc_prisms.state[ prism_id ].send_in_use ) {
-                                stop = true;
-                                return;
-                            }
+                            if ( !( prism_id in nwc_prisms.state ) ) return;
+                            var unsendable = nwc_prisms.state[ prism_id ].send_in_use;
+                            var nwc_string = nwc_prisms.state[ prism_id ].nwc_string;
+                            Object.keys( nwc_prisms.state ).forEach( pid => {
+                                if ( nwc_prisms.state[ pid ].nwc_string === nwc_string && nwc_prisms.state[ pid ].send_in_use && pid != prism_id ) {
+                                    unsendable = true;
+                                    nwc_prisms.state[ pid ].waiting_to_use_2 = true;
+                                }
+                            });
+                            if ( !unsendable ) return;
                             return loop();
                         }
                         await loop();
                         if ( !( prism_id in nwc_prisms.state ) ) return;
                     }
                     nwc_prisms.state[ prism_id ].send_in_use = true;
+                    Object.keys( nwc_prisms.state ).forEach( pid => {
+                        if ( nwc_prisms.state[ pid ].nwc_string === nwc_string && pid != prism_id ) nwc_prisms.state[ pid ].waiting_to_use_2 = false;
+                    });
                     if ( Math.floor( Date.now() / 1000 ) - nwc_prisms.state[ prism_id ].last_time_iou_resolver_ran >= 600 ) {
                         nwc_prisms.resolveIOUs( prism_id );
                     }
@@ -394,10 +438,10 @@
                         return;
                     }
                     nwc_prisms.state[ prism_id ].time_til_income_check = 30;
-                    var prev_timestamp = nwc_prisms.state[ prism_id ].latest_timestamp;
+                    var prev_timestamp = nwc_prisms.state[ prism_id ].latest_timestamp - 86400;
                     var nwc_info = nwcjs.processNWCstring( nwc_prisms.state[ prism_id ].nwc_string );
                     var delay_tolerance = 10;
-                    var latest_txs = await nwcjs.listTransactions( nwc_info, prev_timestamp + 1, null, null, null, null, "incoming", delay_tolerance );
+                    var latest_txs = await nwcjs.listTransactions( nwc_info, prev_timestamp, null, 50, null, null, "incoming", delay_tolerance );
                     if ( !( prism_id in nwc_prisms.state ) ) return;
                     if ( ( "error" in latest_txs ) && latest_txs[ "error" ] ) {
                         nwc_prisms.state[ prism_id ].logs.push( [ Math.floor( Date.now() / 1000 ), "error", latest_txs[ "error" ] ] );
@@ -408,61 +452,119 @@
                         return;
                     }
                     latest_txs = latest_txs.result.transactions;
+                    var loop = async txs => {
+                        await nwcjs.waitSomeSeconds( 1 );
+                        if ( txs.length > 49 ) {
+                            var latest = txs[ 0 ].created_at;
+                            var more_txs = await nwcjs.listTransactions( nwc_info, latest, null, 50, null, null, "incoming", delay_tolerance );
+                            more_txs = more_txs.result.transactions;
+                            txs = [ ...more_txs, ...latest_txs ];
+                            if ( more_txs.length > 49 ) return loop( txs );
+                        }
+                        return latest_txs;
+                    }
+                    latest_txs = await loop( latest_txs );
+                    if ( !( prism_id in nwc_prisms.state ) ) return;
+                    //if this is the first time running, put all txs from before now
+                    //in the "transactions_dealt_with" section
+                    if ( nwc_prisms.state[ prism_id ][ "first_time_running" ] ) {
+                        nwc_prisms.state[ prism_id ][ "first_time_running" ] = false;
+                        var now = Math.floor( Date.now() / 1000 );
+                        var i; for ( i=0; i<latest_txs.length; i++ ) {
+                            var tx = latest_txs[ i ];
+                            if ( tx.created_at < now ) nwc_prisms.state[ prism_id ][ "transactions_dealt_with" ][ tx[ "payment_hash" ] ] = now;
+                        }
+                    }
                     var sats_to_send = 0;
                     var latest_timestamp = prev_timestamp;
                     if ( latest_txs.length ) {
                         latest_timestamp = latest_txs[ 0 ].created_at;
-                        latest_txs.forEach( tx => {
-                            sats_to_send = sats_to_send + tx[ "amount" ];
-                        });
-                    }
-                    sats_to_send = Math.floor( sats_to_send / 1000 );
-                    var received_this_time = sats_to_send;
-                    if ( sats_to_send > 0 ) nwc_prisms.state[ prism_id ].total_received = nwc_prisms.state[ prism_id ].total_received + sats_to_send;
-                    //keep 1.5% or 5 sats (whichever is larger) to pay routing fees
-                    var keep_for_fees = 0;
-                    if ( sats_to_send > 0 ) keep_for_fees = Math.max( Math.round( sats_to_send * .015 ), 5 );
-                    var fee_reserve = 0;
-                    //if the fee_reserve is already at or near the fee_reserve ceiling, do not withhold
-                    //any sats
-                    if ( sats_to_send > 0 && ( Math.abs( nwc_prisms.state[ prism_id ].fee_reserve_ceiling - nwc_prisms.state[ prism_id ].fee_reserve < 10 ) || nwc_prisms.state[ prism_id ].fee_reserve > nwc_prisms.state[ prism_id ].fee_reserve_ceiling ) ) {
-                        keep_for_fees = 0;
-                        //since we are not taking 1.5% from the income, take it from the fee reserve
-                        //because we still need to pay routing fees
-                        nwc_prisms.state[ prism_id ].fee_reserve = Math.round( .985 * nwc_prisms.state[ prism_id ].fee_reserve );
-                    } else if ( sats_to_send > 0 ) {
-                        fee_reserve = nwc_prisms.state[ prism_id ].fee_reserve + Math.round( sats_to_send * .015 );
-                        //if keeping this amount puts you over your fee reserve ceiling, add
-                        //the extra sats *over* your ceiling to the amount you are sending
-                        //to the users
-                        var extra = 0;
-                        if ( fee_reserve > nwc_prisms.state[ prism_id ].fee_reserve_ceiling ) {
-                            extra = fee_reserve - nwc_prisms.state[ prism_id ].fee_reserve_ceiling;
-                            fee_reserve = nwc_prisms.state[ prism_id ].fee_reserve_ceiling;
+                        var i; for ( i=0; i<latest_txs.length; i++ ) {
+                            if ( nwc_prisms.state[ prism_id ].middle_of_send ) {
+                                var loop = async () => {
+                                    await nwcjs.waitSomeSeconds( 1 );
+                                    if ( !nwc_prisms.state[ prism_id ].middle_of_send ) return;
+                                    return loop();
+                                }
+                                await loop();
+                                if ( !( prism_id in nwc_prisms.state ) ) return;
+                            }
+                            nwc_prisms.state[ prism_id ].middle_of_send = true;
+                            var tx = latest_txs[ i ];
+                            //if the transaction has already been dealt with, ignore it
+                            if ( Object.keys( nwc_prisms.state[ prism_id ].transactions_dealt_with ).includes( tx[ "payment_hash" ] ) ) {
+                                nwc_prisms.state[ prism_id ].middle_of_send = false;
+                                continue;
+                            }
+                            //otherwise, put it in "transactions dealt with" so it will be ignored next time
+                            nwc_prisms.state[ prism_id ].transactions_dealt_with[ tx[ "payment_hash" ] ] = Math.floor( Date.now() / 1000 );
+                            //don't count it if the description is wrong
+                            var conditional_clause = nwc_prisms.state[ prism_id ].addys[ 0 ][ 2 ];
+                            var desc = tx[ "description" ];
+                            if ( desc && conditional_clause && !desc.toLowerCase().includes( conditional_clause.toLowerCase() ) ) {
+                                nwc_prisms.state[ prism_id ].middle_of_send = false;
+                                continue;
+                            }
+                            sats_to_send = Math.floor( tx[ "amount" ] / 1000 );
+                            var received_this_time = sats_to_send;
+                            if ( sats_to_send > 0 ) nwc_prisms.state[ prism_id ].total_received = nwc_prisms.state[ prism_id ].total_received + sats_to_send;
+                            //keep 1.5% or 5 sats (whichever is larger) to pay routing fees
+                            var keep_for_fees = 0;
+                            if ( sats_to_send > 0 ) keep_for_fees = Math.max( Math.round( sats_to_send * .015 ), 5 );
+                            var fee_reserve = 0;
+                            //if the fee_reserve is already at or near the fee_reserve ceiling, do not withhold
+                            //any sats
+                            if ( sats_to_send > 0 && ( Math.abs( nwc_prisms.state[ prism_id ].fee_reserve_ceiling - nwc_prisms.state[ prism_id ].fee_reserve < 10 ) || nwc_prisms.state[ prism_id ].fee_reserve > nwc_prisms.state[ prism_id ].fee_reserve_ceiling ) ) {
+                                keep_for_fees = 0;
+                                //since we are not taking 1.5% from the income, take it from the fee reserve
+                                //because we still need to pay routing fees
+                                nwc_prisms.state[ prism_id ].fee_reserve = Math.round( .985 * nwc_prisms.state[ prism_id ].fee_reserve );
+                            } else if ( sats_to_send > 0 ) {
+                                fee_reserve = nwc_prisms.state[ prism_id ].fee_reserve + Math.round( sats_to_send * .015 );
+                                //if keeping this amount puts you over your fee reserve ceiling, add
+                                //the extra sats *over* your ceiling to the amount you are sending
+                                //to the users
+                                var extra = 0;
+                                if ( fee_reserve > nwc_prisms.state[ prism_id ].fee_reserve_ceiling ) {
+                                    extra = fee_reserve - nwc_prisms.state[ prism_id ].fee_reserve_ceiling;
+                                    fee_reserve = nwc_prisms.state[ prism_id ].fee_reserve_ceiling;
+                                }
+                                sats_to_send = ( sats_to_send - keep_for_fees ) + extra;
+                                //save your new fee reserve
+                                nwc_prisms.state[ prism_id ].fee_reserve = fee_reserve;
+                            }
+                            nwc_prisms.state[ prism_id ].latest_timestamp = latest_timestamp;
+                            if ( sats_to_send < 1 || isNaN( sats_to_send ) ) {
+                                await nwcjs.waitSomeSeconds( 1 );
+                                if ( !( prism_id in nwc_prisms.state ) ) return;
+                                nwc_prisms.state[ prism_id ].middle_of_send = false;
+                                continue;
+                            }
+                            nwc_prisms.state[ prism_id ].logs.push( [ Math.floor( Date.now() / 1000 ), "income detected", `received ${received_this_time} sats in an invoice with this description: ${desc || '<none provided>'} -- keeping ${received_this_time - Math.abs( sats_to_send )} sats in reserve for potential fees (if 0, using fee reserves to pay fees) -- dividing up the rest, ${Math.abs( sats_to_send )} sats, to send to the recipients` ] );
+                            var addys_2 = [];
+                            nwc_prisms.state[ prism_id ].addys.forEach( addy => {
+                                var divisor = Number( ( addy[ 1 ] / 100 ).toFixed( 2 ) );
+                                addys_2.push( [ addy[ 0 ], Math.round( sats_to_send * divisor ), addy[ 2 ] ] );
+                            });
+                            var i; for ( i=0; i<addys_2.length; i++ ) {
+                                var addy = addys_2[ i ];
+                                await nwc_prisms.tryToSend( prism_id, JSON.parse( JSON.stringify( addy ) ), i );
+                                if ( !( prism_id in nwc_prisms.state ) ) return;
+                            }
+                            nwc_prisms.state[ prism_id ].middle_of_send = false;
                         }
-                        sats_to_send = ( sats_to_send - keep_for_fees ) + extra;
-                        //save your new fee reserve
-                        nwc_prisms.state[ prism_id ].fee_reserve = fee_reserve;
                     }
-                    nwc_prisms.state[ prism_id ].latest_timestamp = latest_timestamp;
-                    if ( sats_to_send < 1 || isNaN( sats_to_send ) ) {
-                        await nwcjs.waitSomeSeconds( 1 );
+                    var balance_info = await nwcjs.getBalance( nwc_info, delay_tolerance );
+                    if ( !( prism_id in nwc_prisms.state ) ) return;
+                    if ( ( "error" in balance_info ) && balance_info[ "error" ] ) {
+                        nwc_prisms.state[ prism_id ].logs.push( [ Math.floor( Date.now() / 1000 ), "error", balance_info[ "error" ] ] );
+                        await nwcjs.waitSomeSeconds( 3 );
                         if ( !( prism_id in nwc_prisms.state ) ) return;
                         nwc_prisms.state[ prism_id ].send_in_use = false;
                         nwc_prisms.autoPrism( prism_id );
                         return;
                     }
-                    nwc_prisms.state[ prism_id ].logs.push( [ Math.floor( Date.now() / 1000 ), "income detected", `received ${received_this_time} sats -- keeping ${received_this_time - Math.abs( sats_to_send )} sats in reserve for potential fees (if 0, using fee reserves to pay fees) -- dividing up the rest, ${Math.abs( sats_to_send )} sats, to send to the recipients` ] );
-                    var addys_2 = [];
-                    nwc_prisms.state[ prism_id ].addys.forEach( addy => {
-                        var divisor = Number( ( addy[ 1 ] / 100 ).toFixed( 2 ) );
-                        addys_2.push( [ addy[ 0 ], Math.round( sats_to_send * divisor ) ] );
-                    });
-                    var i; for ( i=0; i<addys_2.length; i++ ) {
-                        var addy = addys_2[ i ];
-                        await nwc_prisms.tryToSend( prism_id, JSON.parse( JSON.stringify( addy ) ), i );
-                        if ( !( prism_id in nwc_prisms.state ) ) return;
-                    }
+                    nwc_prisms.state[ prism_id ].fee_reserve = Math.floor( balance_info.result.balance / 1000 );
                     nwc_prisms.state[ prism_id ].send_in_use = false;
                     nwc_prisms.autoPrism( prism_id );
                 },
@@ -488,15 +590,17 @@
                     var div = document.createElement( "div" );
                     var html = `<div class="view_prism ${prism_id}"><div class="prism_name">${prism[ "prism_name" ]}</div>`;
                     var is_hidden = !prism[ "show_details" ] ? "hidden" : "";
-                    var time_til = prism[ "time_til_income_check" ] === 30 ? "checking now..." : String( prism[ "time_til_income_check" ] ) + " seconds";
-                    html += `<div class="details ${is_hidden}"><div class="ln_addys"><p style="font-weight: bold;">Checking for income in: <span class="time_til" style="font-weight: normal;">${time_til}</span></p><p style="font-weight: bold;">Amount received so far: <span class="sats_received" style="font-weight: normal;">${prism[ "total_received" ]} sats</span></p><p style="font-weight: bold;">Amount forwarded so far: <span class="sats_forwarded" style="font-weight: normal;">${prism[ "total_sent" ]} sats</span></p><p style="font-weight: bold;">Reserved for fees: <span class="fee_reserve" style="font-weight: normal;">${prism[ "fee_reserve" ]} sats</span></p><p style="font-weight: bold;">Fee reserve "ceiling": <span class="fee_ceiling" style="font-weight: normal;">${prism[ "fee_reserve_ceiling"]} sats</span></p><p>The fee reserve ceiling limits how much money is kept in reserve for fees. 1.5% of all income is withheld from recipients and stored in the fee reserve to pay for routing fees. Once the fee reserve hits the ceiling, you stop doing that and the recipients get everything.</p><p style="font-weight: bold;">Recipients</p>`;
+                    var time_til = prism[ "time_til_income_check" ] === 30 ? "checking now..." : String( prism[ "time_til_income_check" ] ) + " variable time units (VTUs)";
+                    var cclause_text = "";
+                    if ( prism[ "addys" ][ 0 ][ 2 ] ) cclause_text = `<p style="font-weight: bold;">Conditional clause: <span class="cclause" style="font-weight: normal;">${prism[ "addys" ][ 0 ][ 2 ]}</span></p>`;
+                    html += `<div class="details ${is_hidden}"><div class="ln_addys">${cclause_text}<p style="font-weight: bold;">Checking for income in: <span class="time_til" style="font-weight: normal;">${time_til}</span></p><p style="font-weight: bold;">Amount received so far: <span class="sats_received" style="font-weight: normal;">${prism[ "total_received" ]} sats</span></p><p style="font-weight: bold;">Amount forwarded so far: <span class="sats_forwarded" style="font-weight: normal;">${prism[ "total_sent" ]} sats</span></p><p style="font-weight: bold;">Reserved for fees: <span class="fee_reserve" style="font-weight: normal;">${prism[ "fee_reserve" ]} sats</span></p><p style="font-weight: bold;">Fee reserve "ceiling": <span class="fee_ceiling" style="font-weight: normal;">${prism[ "fee_reserve_ceiling"]} sats</span></p><p>The fee reserve ceiling limits how much money is kept in reserve for fees. 1.5% of all income is withheld from recipients and stored in the fee reserve to pay for routing fees. Once the fee reserve hits the ceiling, you stop doing that and the recipients get everything.</p><p style="font-weight: bold;">Recipients</p>`;
                     prism.addys.forEach( addy => {
                         html += `<div class="ln_addy_div"><div class="ln_addy">${addy[ 0 ]}</div><div class="percent">${addy[ 1 ]}%</div></div>`;
                     });
                     var show_label = !prism.ious.length ? "hidden" : "";
                     html += `</div><div class="ious"><div class="iou_div"><div class="ln_addy_label">IOUs</div><div class="sats_owed_label ${show_label}">Sats owed</div><div class="times_tried_label ${show_label}">Times tried</div></div>`;
                     prism.ious.forEach( addy => {
-                        html += `<div class="iou_div"><div class="ln_addy">${addy[ 0 ]}</div><div class="sats_owed">${addy[ 1 ]}&nbsp;sats</div><div class="times_tried">${addy[ 2 ]}</div></div>`;
+                        html += `<div class="iou_div"><div class="ln_addy">${addy[ 0 ]}</div><div class="sats_owed">${addy[ 1 ]}&nbsp;sats</div><div class="times_tried">${addy[ 3 ]}</div></div>`;
                     });
                     var fn_to_use = !prism[ "show_details" ] ? "showDetails" : "hideDetails";
                     var show_or_hide = !prism[ "show_details" ] ? "Show" : "Hide";
@@ -570,6 +674,9 @@
                     <h2>Create a prism</h2>
                     <p style="font-weight: bold;">Prism name</p>
                     <p><input class="name_your_prism"></p>
+                    <p><button class="conditional_clause_btn">Use conditional clause</button> <button class="conditional_clause_explainer_btn">What's that?</button></p>
+                    <p class="conditional_clause_p hidden"><input class="conditional_clause"></p>
+                    <p class="conditional_clause_explainer hidden">A condtional clause is a word or phrase which you expect to be passed into your prism when some invoices are paid, as the invoice description. If you use it, payments will only go to the people in your prism if the conditional clause you specify in this prism is detected in the invoice's description. You can use this to have the same funding source "conditionally" send money to different people depending on the invoice description.</p>
                     <p style="font-weight: bold;">Recipients</p>
                     <p>Add the recipients and the percent per payment each one should get.</p>
                     <div class="prism_group_boxes">
@@ -590,12 +697,14 @@
                     var stop = false;
                     var err = ``;
                     var prism_name = $( '.name_your_prism' ).value;
+                    var conditional_clause = $( '.conditional_clause' ).value;
                     $$( '.prism_user' ).forEach( ( item, index ) => {
                         if ( !index ) return;
-                        var percent = Number( item.children[ 1 ].value );
+                        var ln_addy = $$( '.prism_user .ln_addy' )[ index ].value;
+                        var percent = Number( $$( '.prism_user .percent' )[ index ].value );
                         if ( !percent || isNaN( percent ) ) stop = true;
                         sum = sum + percent;
-                        addys.push( [ item.children[ 0 ].value, percent ] );
+                        addys.push( [ ln_addy, percent, conditional_clause ] );
                     });
                     if ( stop ) err = `One of your percentages is invalid. Please try again`;
                     if ( sum > 100 ) err = `Your percentages add up to more than 100%. Please try again`;
@@ -608,6 +717,16 @@
                         $( '.new_prism' ).classList.remove( "hidden" );
                         $( '.your_prisms' ).classList.remove( "hidden" );
                     }
+                }
+                $( '.conditional_clause_explainer_btn' ).onclick = () => {
+                    if ( $( '.conditional_clause_explainer' ).classList.contains( "hidden" ) ) $( '.conditional_clause_explainer' ).classList.remove( "hidden" );
+                    else $( '.conditional_clause_explainer' ).classList.add( "hidden" )
+                }
+                $( '.conditional_clause_btn' ).onclick = () => {
+                    $( '.conditional_clause_btn' ).parentElement.style.fontWeight = "bold";
+                    $( '.conditional_clause_btn' ).parentElement.innerHTML = `Enter your conditional clause`;
+                    $( '.conditional_clause_p' ).classList.remove( "hidden" );
+                    $( '.conditional_clause_explainer' ).classList.add( "hidden" )
                 }
                 var removebox = e => e.target.parentElement.remove();
                 var addbox = () => {
@@ -650,9 +769,10 @@
                 var nwc_info = nwcjs.processNWCstring( nwc_prisms.state[ prism_id ].nwc_string );
                 var num_sats = Number( prompt( `enter how many sats you want to send to this prism` ) );
                 if ( !num_sats ) return;
+                var description = prompt( `enter a description you want for this invoice, if any` );
                 showModal( '<p>Loading...</p>' );
                 var delay_tolerance = 10;
-                var invoice_info = await nwcjs.makeInvoice( nwc_info, num_sats, `sending to this prism: ${nwc_prisms.state[ prism_id ].prism_name}`, delay_tolerance );
+                var invoice_info = await nwcjs.makeInvoice( nwc_info, num_sats, description, delay_tolerance );
                 var invoice = null;
                 if ( "result" in invoice_info && "invoice" in invoice_info.result ) invoice = invoice_info.result.invoice;
                 if ( !invoice && "result" in invoice_info && "bolt11" in invoice_info.result ) invoice = invoice_info.result.bolt11;
@@ -719,6 +839,23 @@
                 return dataUriPngImage;
             }
             if ( localStorage[ "nwc_prism_state" ] ) nwc_prisms.state = JSON.parse( localStorage[ "nwc_prism_state" ] );
+            // delete old logs and txs_dealt_with
+            var deleteOldRecords = async () => {
+                var i; for ( i=0; i<Object.keys( nwc_prisms.state ).length; i++ ) {
+                    var now = Math.floor( Date.now() / 1000 );
+                    var prism_id = Object.keys( nwc_prisms.state )[ i ];
+                    var pmthashes = Object.keys( nwc_prisms.state[ prism_id ].transactions_dealt_with );
+                    var j; for ( j=0; j<pmthashes.length; j++ ) {
+                        var pmthash = pmthashes[ j ];
+                        var timestamp = nwc_prisms.state[ prism_id ].transactions_dealt_with[ pmthash ];
+                        if ( timestamp + 86400 + 60 < now ) delete nwc_prisms.state[ prism_id ].transactions_dealt_with[ pmthash ];
+                    }
+                    if ( JSON.stringify( localStorage ).length > 3_000_000 ) nwc_prisms.state[ prism_id ].logs.splice( 0, 1 );
+                }
+                await nwcjs.waitSomeSeconds( 45 );
+                deleteOldRecords();
+            }
+            deleteOldRecords();
             var saveState = async () => {
                 localStorage[ "nwc_prism_state" ] = JSON.stringify( nwc_prisms.state );
                 await nwcjs.waitSomeSeconds( 1 );
@@ -736,7 +873,9 @@
                 var i; for ( i=0; i<Object.keys( nwc_prisms.state ).length; i++ ) {
                     var prism_id = Object.keys( nwc_prisms.state )[ i ];
                     nwc_prisms.state[ prism_id ].send_in_use = false;
+                    nwc_prisms.state[ prism_id ].middle_of_send = false;
                     nwc_prisms.state[ prism_id ].waiting_to_use = false;
+                    nwc_prisms.state[ prism_id ].waiting_to_use_2 = false;
                     nwc_prisms.state[ prism_id ].last_time_iou_resolver_ran = 0;
                     nwc_prisms.autoPrism( prism_id );
                     await nwcjs.waitSomeSeconds( 1 );
